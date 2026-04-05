@@ -64,6 +64,8 @@ Click a card to view the agent's TUI and a diff of all the changes in that workt
 
 To easily test and debug your app, create a Script Shortcut in settings. Use a command like `npm run dev` so that all you have to do is hit a play button in the navbar instead of remembering commands or asking your agent to do it.
 
+You can also customize the built-in workflow columns per project in **Settings → Project → Board columns**. Each column can have its own display title, a base prompt that is prepended when tasks start from that column, and optional preferred agent/model hints for launches. These settings are stored in `<project>/.cline/kanban/config.json`.
+
 ### 6. Ship it
 When the work looks good, hit **Commit** or **Open PR**. Kanban sends a dynamic prompt to the agent to convert the worktree into a commit on your base ref or a new PR branch, and work through any merge conflicts intelligently. Or skip review by enabling auto-commit / auto-PR and the agent ships as soon as it's done. Move the card to trash to clean up the worktree (you can always resume later since Kanban tracks the resume ID).
 

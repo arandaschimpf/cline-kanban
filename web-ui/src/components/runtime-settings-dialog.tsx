@@ -26,6 +26,7 @@ import { useLayoutCustomizations } from "@/resize/layout-customizations";
 import { openFileOnHost } from "@/runtime/runtime-config-query";
 import type {
 	RuntimeAgentId,
+	RuntimeBoardColumnConfig,
 	RuntimeClineMcpServerAuthStatus,
 	RuntimeConfigResponse,
 	RuntimeProjectShortcut,
@@ -105,6 +106,18 @@ function getNextShortcutLabel(shortcuts: RuntimeProjectShortcut[], baseLabel: st
 		suffix += 1;
 	}
 	return `${baseLabel} ${suffix}`;
+}
+
+function normalizeBoardColumnsForComparison(columns: RuntimeBoardColumnConfig[]): string {
+	return JSON.stringify(
+		columns.map((column) => ({
+			id: column.id,
+			title: column.title.trim(),
+			basePrompt: column.basePrompt?.trim() || null,
+			preferredAgentId: column.preferredAgentId ?? null,
+			preferredModel: column.preferredModel?.trim() || null,
+		})),
+	);
 }
 
 function AgentRow({
@@ -303,6 +316,7 @@ export function RuntimeSettingsDialog({
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
 	const [notificationPermission, setNotificationPermission] = useState<BrowserNotificationPermission>("unsupported");
 	const [shortcuts, setShortcuts] = useState<RuntimeProjectShortcut[]>([]);
+	const [boardColumns, setBoardColumns] = useState<RuntimeBoardColumnConfig[]>([]);
 	const [commitPromptTemplate, setCommitPromptTemplate] = useState("");
 	const [openPrPromptTemplate, setOpenPrPromptTemplate] = useState("");
 	const [selectedPromptVariant, setSelectedPromptVariant] = useState<TaskGitAction>("commit");
@@ -366,6 +380,7 @@ export function RuntimeSettingsDialog({
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
 	const initialShortcuts = config?.shortcuts ?? [];
+	const initialBoardColumns = config?.boardColumns ?? [];
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
 	const initialOpenPrPromptTemplate = config?.openPrPromptTemplate ?? "";
 	const clineSettings = useRuntimeSettingsClineController({
@@ -403,6 +418,11 @@ export function RuntimeSettingsDialog({
 			return true;
 		}
 		if (
+			normalizeBoardColumnsForComparison(boardColumns) !== normalizeBoardColumnsForComparison(initialBoardColumns)
+		) {
+			return true;
+		}
+		if (
 			normalizeTemplateForComparison(commitPromptTemplate) !==
 			normalizeTemplateForComparison(initialCommitPromptTemplate)
 		) {
@@ -414,11 +434,13 @@ export function RuntimeSettingsDialog({
 		);
 	}, [
 		agentAutonomousModeEnabled,
+		boardColumns,
 		clineMcpSettings.hasUnsavedChanges,
 		clineSettings.hasUnsavedChanges,
 		commitPromptTemplate,
 		config,
 		initialAgentAutonomousModeEnabled,
+		initialBoardColumns,
 		initialCommitPromptTemplate,
 		initialOpenPrPromptTemplate,
 		initialReadyForReviewNotificationsEnabled,
@@ -438,11 +460,13 @@ export function RuntimeSettingsDialog({
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
 		setShortcuts(config?.shortcuts ?? []);
+		setBoardColumns(config?.boardColumns ?? []);
 		setCommitPromptTemplate(config?.commitPromptTemplate ?? "");
 		setOpenPrPromptTemplate(config?.openPrPromptTemplate ?? "");
 		setSaveError(null);
 	}, [
 		config?.agentAutonomousModeEnabled,
+		config?.boardColumns,
 		config?.commitPromptTemplate,
 		config?.openPrPromptTemplate,
 		config?.readyForReviewNotificationsEnabled,
@@ -567,6 +591,7 @@ export function RuntimeSettingsDialog({
 			agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled,
 			shortcuts,
+			boardColumns,
 			commitPromptTemplate,
 			openPrPromptTemplate,
 		});
@@ -763,6 +788,116 @@ export function RuntimeSettingsDialog({
 						: "<project>/.cline/kanban/config.json"}
 					{config?.projectConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 				</p>
+
+				<h6 className="font-semibold text-text-primary mt-3 mb-2">Board columns</h6>
+				<p className="text-text-secondary text-[13px] mt-0 mb-2">
+					Customize each workflow column title, starter prompt, and the preferred agent/model used when launching a
+					task from that column.
+				</p>
+				<div className="grid gap-3">
+					{boardColumns.map((column, columnIndex) => (
+						<div key={column.id} className="rounded-lg border border-border bg-surface-1 p-3">
+							<div className="flex items-center justify-between gap-3">
+								<div>
+									<p className="m-0 text-[13px] font-medium text-text-primary">{column.id}</p>
+									<p className="m-0 text-xs text-text-secondary">
+										Workflow role stays fixed; the title and launch behavior are configurable.
+									</p>
+								</div>
+							</div>
+							<div className="grid gap-2 mt-3 md:grid-cols-2">
+								<label className="grid gap-1">
+									<span className="text-xs text-text-secondary">Column title</span>
+									<input
+										value={column.title}
+										onChange={(event) =>
+											setBoardColumns((current) =>
+												current.map((item, itemIndex) =>
+													itemIndex === columnIndex ? { ...item, title: event.target.value } : item,
+												),
+											)
+										}
+										disabled={controlsDisabled}
+										className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+									/>
+								</label>
+								<label className="grid gap-1">
+									<span className="text-xs text-text-secondary">Preferred agent</span>
+									<select
+										value={column.preferredAgentId ?? ""}
+										onChange={(event) =>
+											setBoardColumns((current) =>
+												current.map((item, itemIndex) =>
+													itemIndex === columnIndex
+														? {
+																...item,
+																preferredAgentId:
+																	event.target.value === ""
+																		? null
+																		: (event.target.value as RuntimeAgentId),
+															}
+														: item,
+												),
+											)
+										}
+										disabled={controlsDisabled}
+										className="h-8 rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary focus:border-border-focus focus:outline-none"
+									>
+										<option value="">Use global default</option>
+										{displayedAgents.map((agent) => (
+											<option key={agent.id} value={agent.id}>
+												{agent.label}
+											</option>
+										))}
+									</select>
+								</label>
+							</div>
+							<label className="grid gap-1 mt-2">
+								<span className="text-xs text-text-secondary">Base prompt</span>
+								<textarea
+									rows={3}
+									value={column.basePrompt ?? ""}
+									onChange={(event) =>
+										setBoardColumns((current) =>
+											current.map((item, itemIndex) =>
+												itemIndex === columnIndex
+													? {
+															...item,
+															basePrompt: event.target.value,
+														}
+													: item,
+											),
+										)
+									}
+									placeholder="Optional instructions prepended before the task prompt."
+									disabled={controlsDisabled}
+									className="w-full rounded-md border border-border bg-surface-2 p-3 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none resize-none disabled:opacity-40"
+								/>
+							</label>
+							<label className="grid gap-1 mt-2">
+								<span className="text-xs text-text-secondary">Preferred model (optional)</span>
+								<input
+									value={column.preferredModel ?? ""}
+									onChange={(event) =>
+										setBoardColumns((current) =>
+											current.map((item, itemIndex) =>
+												itemIndex === columnIndex
+													? {
+															...item,
+															preferredModel: event.target.value,
+														}
+													: item,
+											),
+										)
+									}
+									placeholder="Used for Cline task launches when set"
+									disabled={controlsDisabled}
+									className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+								/>
+							</label>
+						</div>
+					))}
+				</div>
 
 				<div className="flex items-center justify-between mt-3 mb-2">
 					<h6 ref={shortcutsSectionRef} className="font-semibold text-text-primary m-0">

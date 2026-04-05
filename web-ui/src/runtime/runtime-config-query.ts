@@ -4,6 +4,7 @@
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
 	RuntimeAgentId,
+	RuntimeBoardColumnConfig,
 	RuntimeClineAccountProfileResponse,
 	RuntimeClineAddProviderResponse,
 	RuntimeClineKanbanAccessResponse,
@@ -37,6 +38,7 @@ export async function saveRuntimeConfig(
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
 		shortcuts?: RuntimeProjectShortcut[];
+		boardColumns?: RuntimeBoardColumnConfig[];
 		readyForReviewNotificationsEnabled?: boolean;
 		commitPromptTemplate?: string;
 		openPrPromptTemplate?: string;

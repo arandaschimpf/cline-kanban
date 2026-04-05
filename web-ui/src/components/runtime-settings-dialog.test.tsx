@@ -92,6 +92,12 @@ const savedClineOauthConfig = {
 	effectiveCommand: "cline",
 	detectedCommands: [],
 	shortcuts: [],
+	boardColumns: [
+		{ id: "backlog", title: "Queued", basePrompt: "Start by reading the docs.", preferredAgentId: "codex" },
+		{ id: "in_progress", title: "Building" },
+		{ id: "review", title: "QA" },
+		{ id: "trash", title: "Done" },
+	],
 	commitPromptTemplate: "",
 	openPrPromptTemplate: "",
 	commitPromptTemplateDefault: "",
@@ -193,5 +199,24 @@ describe("RuntimeSettingsDialog", () => {
 		});
 
 		expect(resetLayoutCustomizationsMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders the configured board column settings", async () => {
+		await act(async () => {
+			root.render(
+				<RuntimeSettingsDialog
+					open={true}
+					workspaceId={"workspace-1"}
+					initialConfig={savedClineOauthConfig}
+					onOpenChange={() => {}}
+				/>,
+			);
+		});
+
+		expect(document.body.textContent).toContain("Board columns");
+		expect(Array.from(document.body.querySelectorAll("input")).some((input) => input.value === "Queued")).toBe(true);
+		expect(Array.from(document.body.querySelectorAll("input")).some((input) => input.value === "Building")).toBe(
+			true,
+		);
 	});
 });

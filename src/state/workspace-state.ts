@@ -4,8 +4,9 @@ import { readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
-
+import { getDefaultBoardColumns, loadRuntimeConfig } from "../config/runtime-config";
 import {
+	type RuntimeBoardColumnConfig,
 	type RuntimeBoardColumnId,
 	type RuntimeBoardData,
 	type RuntimeGitRepositoryInfo,
@@ -31,13 +32,6 @@ const META_FILENAME = "meta.json";
 const INDEX_VERSION = 1;
 const WORKSPACE_ID_COLLISION_SUFFIX_LENGTH = 4;
 
-const BOARD_COLUMNS: Array<{ id: RuntimeBoardColumnId; title: string }> = [
-	{ id: "backlog", title: "Backlog" },
-	{ id: "in_progress", title: "In Progress" },
-	{ id: "review", title: "Review" },
-	{ id: "trash", title: "Trash" },
-];
-
 interface WorkspaceIndexEntry {
 	workspaceId: string;
 	repoPath: string;
@@ -58,6 +52,8 @@ interface WorkspaceStateMeta {
 	revision: number;
 	updatedAt: number;
 }
+
+type BoardCards = RuntimeBoardData["columns"][number]["cards"];
 
 const workspaceStateMetaSchema = z.object({
 	revision: z.number().int().nonnegative(),
@@ -139,15 +135,39 @@ export interface LoadWorkspaceContextOptions {
 	autoCreateIfMissing?: boolean;
 }
 
-function createEmptyBoard(): RuntimeBoardData {
+function createEmptyBoard(columns: RuntimeBoardColumnConfig[] = getDefaultBoardColumns()): RuntimeBoardData {
 	return {
-		columns: BOARD_COLUMNS.map((column) => ({
+		columns: columns.map((column) => ({
 			id: column.id,
 			title: column.title,
+			basePrompt: column.basePrompt,
+			preferredAgentId: column.preferredAgentId,
+			preferredModel: column.preferredModel,
 			cards: [],
 		})),
 		dependencies: [],
 	};
+}
+
+function synchronizeBoardColumns(
+	board: RuntimeBoardData,
+	configuredColumns: RuntimeBoardColumnConfig[],
+): RuntimeBoardData {
+	const cardMap = new Map<RuntimeBoardColumnId, BoardCards>();
+	for (const column of board.columns) {
+		cardMap.set(column.id, column.cards);
+	}
+	return updateTaskDependencies({
+		...board,
+		columns: configuredColumns.map((column) => ({
+			id: column.id,
+			title: column.title,
+			basePrompt: column.basePrompt,
+			preferredAgentId: column.preferredAgentId,
+			preferredModel: column.preferredModel,
+			cards: cardMap.get(column.id) ?? [],
+		})),
+	});
 }
 
 function createEmptyWorkspaceIndex(): WorkspaceIndexFile {
@@ -292,16 +312,29 @@ function parseWorkspaceStateSavePayload(payload: RuntimeWorkspaceStateSaveReques
 	return parsed.data;
 }
 
-async function readWorkspaceBoard(workspaceId: string): Promise<RuntimeBoardData> {
+async function readWorkspaceBoard(
+	workspaceId: string,
+	configuredColumns: RuntimeBoardColumnConfig[] = getDefaultBoardColumns(),
+): Promise<RuntimeBoardData> {
 	const boardPath = getWorkspaceBoardPath(workspaceId);
 	const rawBoard = await readJsonFile(boardPath);
-	return updateTaskDependencies(
-		parsePersistedStateFile(boardPath, BOARD_FILENAME, rawBoard, runtimeBoardDataSchema, createEmptyBoard()),
+	const parsedBoard = parsePersistedStateFile(
+		boardPath,
+		BOARD_FILENAME,
+		rawBoard,
+		runtimeBoardDataSchema,
+		createEmptyBoard(configuredColumns),
 	);
+	return synchronizeBoardColumns(parsedBoard, configuredColumns);
 }
 
 export async function loadWorkspaceBoardById(workspaceId: string): Promise<RuntimeBoardData> {
-	return await readWorkspaceBoard(workspaceId);
+	const context = await loadWorkspaceContextById(workspaceId);
+	if (!context) {
+		return createEmptyBoard();
+	}
+	const runtimeConfig = await loadRuntimeConfig(context.repoPath);
+	return await readWorkspaceBoard(workspaceId, runtimeConfig.boardColumns);
 }
 
 async function readWorkspaceSessions(workspaceId: string): Promise<Record<string, RuntimeTaskSessionSummary>> {
@@ -639,7 +672,8 @@ export async function removeWorkspaceStateFiles(workspaceId: string): Promise<vo
 
 export async function loadWorkspaceState(cwd: string): Promise<RuntimeWorkspaceStateResponse> {
 	const context = await loadWorkspaceContext(cwd);
-	const board = await readWorkspaceBoard(context.workspaceId);
+	const runtimeConfig = await loadRuntimeConfig(context.repoPath);
+	const board = await readWorkspaceBoard(context.workspaceId, runtimeConfig.boardColumns);
 	const sessions = await readWorkspaceSessions(context.workspaceId);
 	const meta = await readWorkspaceMeta(context.workspaceId);
 	return toWorkspaceStateResponse(context, board, sessions, meta.revision);
@@ -651,6 +685,7 @@ export async function saveWorkspaceState(
 ): Promise<RuntimeWorkspaceStateResponse> {
 	const parsedPayload = parseWorkspaceStateSavePayload(payload);
 	const context = await loadWorkspaceContext(cwd);
+	const runtimeConfig = await loadRuntimeConfig(context.repoPath);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const metaPath = getWorkspaceMetaPath(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
@@ -663,7 +698,7 @@ export async function saveWorkspaceState(
 		) {
 			throw new WorkspaceStateConflictError(expectedRevision, currentMeta.revision);
 		}
-		const board = parsedPayload.board;
+		const board = synchronizeBoardColumns(parsedPayload.board, runtimeConfig.boardColumns);
 		const sessions = parsedPayload.sessions;
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {
@@ -703,8 +738,9 @@ export async function mutateWorkspaceState<T>(
 	mutate: (state: RuntimeWorkspaceStateResponse) => RuntimeWorkspaceAtomicMutationResult<T>,
 ): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
 	const context = await loadWorkspaceContext(cwd);
+	const runtimeConfig = await loadRuntimeConfig(context.repoPath);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
-		const currentBoard = await readWorkspaceBoard(context.workspaceId);
+		const currentBoard = await readWorkspaceBoard(context.workspaceId, runtimeConfig.boardColumns);
 		const currentSessions = await readWorkspaceSessions(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
 		const currentState = toWorkspaceStateResponse(context, currentBoard, currentSessions, currentMeta.revision);
@@ -718,7 +754,7 @@ export async function mutateWorkspaceState<T>(
 			};
 		}
 
-		const nextBoard = mutation.board;
+		const nextBoard = synchronizeBoardColumns(mutation.board, runtimeConfig.boardColumns);
 		const nextSessions = mutation.sessions ?? currentSessions;
 		const nextRevision = currentMeta.revision + 1;
 		const nextMeta: WorkspaceStateMeta = {

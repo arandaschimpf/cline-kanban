@@ -5,7 +5,12 @@ import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isRuntimeAgentLaunchSupported } from "../core/agent-catalog";
-import type { RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract";
+import type {
+	RuntimeAgentId,
+	RuntimeBoardColumnConfig,
+	RuntimeBoardColumnId,
+	RuntimeProjectShortcut,
+} from "../core/api-contract";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system";
 import { detectInstalledCommands } from "../terminal/agent-registry";
 import { areRuntimeProjectShortcutsEqual } from "./shortcut-utils";
@@ -21,6 +26,7 @@ interface RuntimeGlobalConfigFileShape {
 
 interface RuntimeProjectConfigFileShape {
 	shortcuts?: RuntimeProjectShortcut[];
+	boardColumns?: RuntimeBoardColumnConfig[];
 }
 
 export interface RuntimeConfigState {
@@ -31,6 +37,7 @@ export interface RuntimeConfigState {
 	agentAutonomousModeEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
 	shortcuts: RuntimeProjectShortcut[];
+	boardColumns: RuntimeBoardColumnConfig[];
 	commitPromptTemplate: string;
 	openPrPromptTemplate: string;
 	commitPromptTemplateDefault: string;
@@ -43,6 +50,7 @@ export interface RuntimeConfigUpdateInput {
 	agentAutonomousModeEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
 	shortcuts?: RuntimeProjectShortcut[];
+	boardColumns?: RuntimeBoardColumnConfig[];
 	commitPromptTemplate?: string;
 	openPrPromptTemplate?: string;
 }
@@ -57,6 +65,21 @@ const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex", "droid"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
+function createDefaultBoardColumn(id: RuntimeBoardColumnId, title: string): RuntimeBoardColumnConfig {
+	return {
+		id,
+		title,
+		basePrompt: null,
+		preferredAgentId: null,
+		preferredModel: null,
+	};
+}
+const DEFAULT_BOARD_COLUMNS: readonly RuntimeBoardColumnConfig[] = [
+	createDefaultBoardColumn("backlog", "Backlog"),
+	createDefaultBoardColumn("in_progress", "In Progress"),
+	createDefaultBoardColumn("review", "Review"),
+	createDefaultBoardColumn("trash", "Trash"),
+] as const;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
 - Do not run destructive commands: git reset --hard, git clean -fdx, git worktree remove, rm/mv on repository paths.
@@ -165,6 +188,87 @@ function normalizeShortcuts(shortcuts: RuntimeProjectShortcut[] | null | undefin
 		}
 	}
 	return normalized;
+}
+
+function normalizeBoardColumnId(value: RuntimeBoardColumnId | string | null | undefined): RuntimeBoardColumnId | null {
+	if (DEFAULT_BOARD_COLUMNS.some((column) => column.id === value)) {
+		return value as RuntimeBoardColumnId;
+	}
+	return null;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+	if (typeof value !== "string") {
+		return null;
+	}
+	const normalized = value.trim();
+	return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeBoardColumns(columns: RuntimeBoardColumnConfig[] | null | undefined): RuntimeBoardColumnConfig[] {
+	const source = Array.isArray(columns) ? columns : [];
+	const byId = new Map<RuntimeBoardColumnId, RuntimeBoardColumnConfig>();
+	const orderedIds: RuntimeBoardColumnId[] = [];
+
+	for (const entry of source) {
+		if (!entry || typeof entry !== "object") {
+			continue;
+		}
+		const id = normalizeBoardColumnId(entry.id);
+		if (!id || byId.has(id)) {
+			continue;
+		}
+		const defaultColumn = DEFAULT_BOARD_COLUMNS.find((column) => column.id === id);
+		if (!defaultColumn) {
+			continue;
+		}
+		byId.set(id, {
+			id,
+			title: normalizeNullableString(entry.title) ?? defaultColumn.title,
+			basePrompt: normalizeNullableString(entry.basePrompt),
+			preferredAgentId: entry.preferredAgentId ? normalizeAgentId(entry.preferredAgentId) : null,
+			preferredModel: normalizeNullableString(entry.preferredModel),
+		});
+		orderedIds.push(id);
+	}
+
+	for (const defaultColumn of DEFAULT_BOARD_COLUMNS) {
+		if (byId.has(defaultColumn.id)) {
+			continue;
+		}
+		byId.set(defaultColumn.id, { ...defaultColumn });
+		orderedIds.push(defaultColumn.id);
+	}
+
+	return orderedIds
+		.map((id) => byId.get(id))
+		.filter((column): column is RuntimeBoardColumnConfig => column !== undefined);
+}
+
+export function getDefaultBoardColumns(): RuntimeBoardColumnConfig[] {
+	return DEFAULT_BOARD_COLUMNS.map((column) => ({ ...column }));
+}
+
+function areRuntimeBoardColumnsEqual(
+	left: RuntimeBoardColumnConfig[] | null | undefined,
+	right: RuntimeBoardColumnConfig[] | null | undefined,
+): boolean {
+	const normalizedLeft = normalizeBoardColumns(left);
+	const normalizedRight = normalizeBoardColumns(right);
+	if (normalizedLeft.length !== normalizedRight.length) {
+		return false;
+	}
+	return normalizedLeft.every((column, index) => {
+		const candidate = normalizedRight[index];
+		return (
+			candidate !== undefined &&
+			candidate.id === column.id &&
+			candidate.title === column.title &&
+			candidate.basePrompt === column.basePrompt &&
+			candidate.preferredAgentId === column.preferredAgentId &&
+			candidate.preferredModel === column.preferredModel
+		);
+	});
 }
 
 function normalizePromptTemplate(value: unknown, fallback: string): string {
@@ -281,6 +385,7 @@ function toRuntimeConfigState({
 			DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED,
 		),
 		shortcuts: normalizeShortcuts(projectConfig?.shortcuts),
+		boardColumns: normalizeBoardColumns(projectConfig?.boardColumns),
 		commitPromptTemplate: normalizePromptTemplate(globalConfig?.commitPromptTemplate, DEFAULT_COMMIT_PROMPT_TEMPLATE),
 		openPrPromptTemplate: normalizePromptTemplate(
 			globalConfig?.openPrPromptTemplate,
@@ -379,16 +484,20 @@ async function writeRuntimeGlobalConfigFile(
 
 async function writeRuntimeProjectConfigFile(
 	configPath: string | null,
-	config: { shortcuts: RuntimeProjectShortcut[] },
+	config: { shortcuts: RuntimeProjectShortcut[]; boardColumns: RuntimeBoardColumnConfig[] },
 ): Promise<void> {
 	const normalizedShortcuts = normalizeShortcuts(config.shortcuts);
+	const normalizedBoardColumns = normalizeBoardColumns(config.boardColumns);
+	const shouldPersistBoardColumns =
+		normalizedBoardColumns.length > 0 &&
+		!areRuntimeBoardColumnsEqual(normalizedBoardColumns, getDefaultBoardColumns());
 	if (!configPath) {
-		if (normalizedShortcuts.length > 0) {
-			throw new Error("Cannot save project shortcuts without a selected project.");
+		if (normalizedShortcuts.length > 0 || shouldPersistBoardColumns) {
+			throw new Error("Cannot save project settings without a selected project.");
 		}
 		return;
 	}
-	if (normalizedShortcuts.length === 0) {
+	if (normalizedShortcuts.length === 0 && !shouldPersistBoardColumns) {
 		await rm(configPath, { force: true });
 		try {
 			await rm(dirname(configPath));
@@ -400,7 +509,8 @@ async function writeRuntimeProjectConfigFile(
 	await lockedFileSystem.writeJsonFileAtomic(
 		configPath,
 		{
-			shortcuts: normalizedShortcuts,
+			...(normalizedShortcuts.length > 0 ? { shortcuts: normalizedShortcuts } : {}),
+			...(shouldPersistBoardColumns ? { boardColumns: normalizedBoardColumns } : {}),
 		} satisfies RuntimeProjectConfigFileShape,
 		{
 			lock: null,
@@ -451,6 +561,7 @@ function createRuntimeConfigStateFromValues(input: {
 	agentAutonomousModeEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
 	shortcuts: RuntimeProjectShortcut[];
+	boardColumns: RuntimeBoardColumnConfig[];
 	commitPromptTemplate: string;
 	openPrPromptTemplate: string;
 }): RuntimeConfigState {
@@ -468,6 +579,7 @@ function createRuntimeConfigStateFromValues(input: {
 			DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED,
 		),
 		shortcuts: normalizeShortcuts(input.shortcuts),
+		boardColumns: normalizeBoardColumns(input.boardColumns),
 		commitPromptTemplate: normalizePromptTemplate(input.commitPromptTemplate, DEFAULT_COMMIT_PROMPT_TEMPLATE),
 		openPrPromptTemplate: normalizePromptTemplate(input.openPrPromptTemplate, DEFAULT_OPEN_PR_PROMPT_TEMPLATE),
 		commitPromptTemplateDefault: DEFAULT_COMMIT_PROMPT_TEMPLATE,
@@ -484,6 +596,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		agentAutonomousModeEnabled: current.agentAutonomousModeEnabled,
 		readyForReviewNotificationsEnabled: current.readyForReviewNotificationsEnabled,
 		shortcuts: [],
+		boardColumns: getDefaultBoardColumns(),
 		commitPromptTemplate: current.commitPromptTemplate,
 		openPrPromptTemplate: current.openPrPromptTemplate,
 	});
@@ -519,12 +632,14 @@ export async function saveRuntimeConfig(
 		agentAutonomousModeEnabled: boolean;
 		readyForReviewNotificationsEnabled: boolean;
 		shortcuts: RuntimeProjectShortcut[];
+		boardColumns?: RuntimeBoardColumnConfig[];
 		commitPromptTemplate: string;
 		openPrPromptTemplate: string;
 	},
 ): Promise<RuntimeConfigState> {
 	const { globalConfigPath, projectConfigPath } = resolveRuntimeConfigPaths(cwd);
 	return await lockedFileSystem.withLocks(getRuntimeConfigLockRequests(cwd), async () => {
+		const boardColumns = config.boardColumns ?? getDefaultBoardColumns();
 		await writeRuntimeGlobalConfigFile(globalConfigPath, {
 			selectedAgentId: config.selectedAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
@@ -533,7 +648,10 @@ export async function saveRuntimeConfig(
 			commitPromptTemplate: config.commitPromptTemplate,
 			openPrPromptTemplate: config.openPrPromptTemplate,
 		});
-		await writeRuntimeProjectConfigFile(projectConfigPath, { shortcuts: config.shortcuts });
+		await writeRuntimeProjectConfigFile(projectConfigPath, {
+			shortcuts: config.shortcuts,
+			boardColumns,
+		});
 		return createRuntimeConfigStateFromValues({
 			globalConfigPath,
 			projectConfigPath,
@@ -542,6 +660,7 @@ export async function saveRuntimeConfig(
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
 			shortcuts: config.shortcuts,
+			boardColumns,
 			commitPromptTemplate: config.commitPromptTemplate,
 			openPrPromptTemplate: config.openPrPromptTemplate,
 		});
@@ -552,8 +671,13 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 	const { globalConfigPath, projectConfigPath } = resolveRuntimeConfigPaths(cwd);
 	return await lockedFileSystem.withLocks(getRuntimeConfigLockRequests(cwd), async () => {
 		const current = await loadRuntimeConfigLocked(cwd);
-		if (projectConfigPath === null && normalizeShortcuts(updates.shortcuts).length > 0) {
-			throw new Error("Cannot save project shortcuts without a selected project.");
+		if (
+			projectConfigPath === null &&
+			(normalizeShortcuts(updates.shortcuts).length > 0 ||
+				(updates.boardColumns !== undefined &&
+					!areRuntimeBoardColumnsEqual(updates.boardColumns, getDefaultBoardColumns())))
+		) {
+			throw new Error("Cannot save project settings without a selected project.");
 		}
 		const nextConfig = {
 			selectedAgentId: updates.selectedAgentId ?? current.selectedAgentId,
@@ -563,6 +687,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			readyForReviewNotificationsEnabled:
 				updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 			shortcuts: projectConfigPath ? (updates.shortcuts ?? current.shortcuts) : current.shortcuts,
+			boardColumns: projectConfigPath ? (updates.boardColumns ?? current.boardColumns) : current.boardColumns,
 			commitPromptTemplate: updates.commitPromptTemplate ?? current.commitPromptTemplate,
 			openPrPromptTemplate: updates.openPrPromptTemplate ?? current.openPrPromptTemplate,
 		};
@@ -574,7 +699,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
 			nextConfig.commitPromptTemplate !== current.commitPromptTemplate ||
 			nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
-			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts);
+			!areRuntimeProjectShortcutsEqual(nextConfig.shortcuts, current.shortcuts) ||
+			!areRuntimeBoardColumnsEqual(nextConfig.boardColumns, current.boardColumns);
 
 		if (!hasChanges) {
 			return current;
@@ -590,6 +716,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 		});
 		await writeRuntimeProjectConfigFile(projectConfigPath, {
 			shortcuts: nextConfig.shortcuts,
+			boardColumns: nextConfig.boardColumns,
 		});
 		return createRuntimeConfigStateFromValues({
 			globalConfigPath,
@@ -599,6 +726,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 			shortcuts: nextConfig.shortcuts,
+			boardColumns: nextConfig.boardColumns,
 			commitPromptTemplate: nextConfig.commitPromptTemplate,
 			openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 		});
@@ -628,6 +756,7 @@ export async function updateGlobalRuntimeConfig(
 				readyForReviewNotificationsEnabled:
 					updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 				shortcuts: current.shortcuts,
+				boardColumns: current.boardColumns,
 				commitPromptTemplate: updates.commitPromptTemplate ?? current.commitPromptTemplate,
 				openPrPromptTemplate: updates.openPrPromptTemplate ?? current.openPrPromptTemplate,
 			};
@@ -661,6 +790,7 @@ export async function updateGlobalRuntimeConfig(
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 				shortcuts: nextConfig.shortcuts,
+				boardColumns: nextConfig.boardColumns,
 				commitPromptTemplate: nextConfig.commitPromptTemplate,
 				openPrPromptTemplate: nextConfig.openPrPromptTemplate,
 			});

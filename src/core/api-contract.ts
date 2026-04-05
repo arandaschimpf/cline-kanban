@@ -103,9 +103,17 @@ export type RuntimeBoardCard = z.infer<typeof runtimeBoardCardSchema>;
 export const runtimeBoardColumnSchema = z.object({
 	id: runtimeBoardColumnIdSchema,
 	title: z.string(),
+	basePrompt: z.string().nullable().optional(),
+	preferredAgentId: runtimeAgentIdSchema.nullable().optional(),
+	preferredModel: z.string().nullable().optional(),
 	cards: z.array(runtimeBoardCardSchema),
 });
 export type RuntimeBoardColumn = z.infer<typeof runtimeBoardColumnSchema>;
+
+export const runtimeBoardColumnConfigSchema = runtimeBoardColumnSchema.omit({
+	cards: true,
+});
+export type RuntimeBoardColumnConfig = z.infer<typeof runtimeBoardColumnConfigSchema>;
 
 export const runtimeBoardDependencySchema = z.object({
 	id: z.string(),
@@ -782,6 +790,7 @@ export const runtimeConfigResponseSchema = z.object({
 	detectedCommands: z.array(z.string()),
 	agents: z.array(runtimeAgentDefinitionSchema),
 	shortcuts: z.array(runtimeProjectShortcutSchema),
+	boardColumns: z.array(runtimeBoardColumnConfigSchema).optional(),
 	clineProviderSettings: runtimeClineProviderSettingsSchema,
 	commitPromptTemplate: z.string(),
 	openPrPromptTemplate: z.string(),
@@ -795,6 +804,7 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	selectedShortcutLabel: z.string().nullable().optional(),
 	agentAutonomousModeEnabled: z.boolean().optional(),
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
+	boardColumns: z.array(runtimeBoardColumnConfigSchema).optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),
 	openPrPromptTemplate: z.string().optional(),
