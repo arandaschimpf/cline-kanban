@@ -206,8 +206,8 @@ function normalizeShortcuts(shortcuts: RuntimeProjectShortcut[] | null | undefin
 }
 
 function normalizeBoardColumnId(value: RuntimeBoardColumnId | string | null | undefined): RuntimeBoardColumnId | null {
-	if (value === "backlog" || value === "in_progress" || value === "review" || value === "trash") {
-		return value;
+	if (DEFAULT_BOARD_COLUMNS.some((column) => column.id === value)) {
+		return value as RuntimeBoardColumnId;
 	}
 	return null;
 }

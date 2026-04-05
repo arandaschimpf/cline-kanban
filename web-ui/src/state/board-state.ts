@@ -1,8 +1,10 @@
 import type { DropResult } from "@hello-pangea/dnd";
+import { getRuntimeAgentCatalogEntry } from "@runtime-agent-catalog";
 import { createShortTaskId } from "@runtime-task-id";
 import * as runtimeTaskState from "@runtime-task-state";
 
 import { createInitialBoardData } from "@/data/board-data";
+import type { RuntimeAgentId } from "@/runtime/types";
 import { isAllowedCrossColumnCardMove, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import {
 	type BoardCard,
@@ -152,13 +154,9 @@ function normalizeColumnMetadata(
 	const basePrompt =
 		typeof column.basePrompt === "string" && column.basePrompt.trim().length > 0 ? column.basePrompt : null;
 	const preferredAgentId =
-		column.preferredAgentId === "cline" ||
-		column.preferredAgentId === "claude" ||
-		column.preferredAgentId === "codex" ||
-		column.preferredAgentId === "droid" ||
-		column.preferredAgentId === "gemini" ||
-		column.preferredAgentId === "opencode"
-			? column.preferredAgentId
+		typeof column.preferredAgentId === "string" &&
+		getRuntimeAgentCatalogEntry(column.preferredAgentId as RuntimeAgentId)
+			? (column.preferredAgentId as RuntimeAgentId)
 			: null;
 	const preferredModel =
 		typeof column.preferredModel === "string" && column.preferredModel.trim().length > 0
