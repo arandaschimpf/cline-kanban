@@ -53,6 +53,8 @@ interface WorkspaceStateMeta {
 	updatedAt: number;
 }
 
+type BoardCards = RuntimeBoardData["columns"][number]["cards"];
+
 const workspaceStateMetaSchema = z.object({
 	revision: z.number().int().nonnegative(),
 	updatedAt: z.number(),
@@ -151,7 +153,7 @@ function synchronizeBoardColumns(
 	board: RuntimeBoardData,
 	configuredColumns: RuntimeBoardColumnConfig[],
 ): RuntimeBoardData {
-	const cardMap = new Map<RuntimeBoardColumnId, RuntimeBoardData["columns"][number]["cards"]>();
+	const cardMap = new Map<RuntimeBoardColumnId, BoardCards>();
 	for (const column of board.columns) {
 		cardMap.set(column.id, column.cards);
 	}

@@ -65,35 +65,20 @@ const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex", "droid"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
+function createDefaultBoardColumn(id: RuntimeBoardColumnId, title: string): RuntimeBoardColumnConfig {
+	return {
+		id,
+		title,
+		basePrompt: null,
+		preferredAgentId: null,
+		preferredModel: null,
+	};
+}
 const DEFAULT_BOARD_COLUMNS: readonly RuntimeBoardColumnConfig[] = [
-	{
-		id: "backlog",
-		title: "Backlog",
-		basePrompt: null,
-		preferredAgentId: null,
-		preferredModel: null,
-	},
-	{
-		id: "in_progress",
-		title: "In Progress",
-		basePrompt: null,
-		preferredAgentId: null,
-		preferredModel: null,
-	},
-	{
-		id: "review",
-		title: "Review",
-		basePrompt: null,
-		preferredAgentId: null,
-		preferredModel: null,
-	},
-	{
-		id: "trash",
-		title: "Trash",
-		basePrompt: null,
-		preferredAgentId: null,
-		preferredModel: null,
-	},
+	createDefaultBoardColumn("backlog", "Backlog"),
+	createDefaultBoardColumn("in_progress", "In Progress"),
+	createDefaultBoardColumn("review", "Review"),
+	createDefaultBoardColumn("trash", "Trash"),
 ] as const;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 

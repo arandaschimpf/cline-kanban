@@ -257,10 +257,8 @@ export function normalizeBoardData(rawBoard: unknown): BoardData | null {
 			continue;
 		}
 		const metadata = normalizeColumnMetadata(rawColumn);
-		normalizedColumn.title =
-			typeof (rawColumn as { title?: unknown }).title === "string" && (rawColumn as { title?: string }).title?.trim()
-				? (rawColumn as { title: string }).title
-				: normalizedColumn.title;
+		const rawTitle = (rawColumn as { title?: unknown }).title;
+		normalizedColumn.title = typeof rawTitle === "string" && rawTitle.trim() ? rawTitle : normalizedColumn.title;
 		normalizedColumn.basePrompt = metadata.basePrompt;
 		normalizedColumn.preferredAgentId = metadata.preferredAgentId;
 		normalizedColumn.preferredModel = metadata.preferredModel;
