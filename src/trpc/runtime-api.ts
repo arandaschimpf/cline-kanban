@@ -37,6 +37,7 @@ import {
 } from "../core/api-validation";
 import { isHomeAgentSessionId } from "../core/home-agent-session";
 import { openInBrowser } from "../server/browser";
+import { loadWorkspaceBoardById } from "../state/workspace-state";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry";
 import type { TerminalSessionManager } from "../terminal/session-manager";
 import { resolveTaskCwd } from "../workspace/task-worktree";
@@ -80,6 +81,18 @@ async function resolveExistingTaskCwdOrEnsure(options: {
 			ensure: true,
 		});
 	}
+}
+
+function prependColumnBasePrompt(prompt: string, basePrompt: string | null | undefined): string {
+	const trimmedPrompt = prompt.trim();
+	const trimmedBasePrompt = basePrompt?.trim() ?? "";
+	if (!trimmedPrompt) {
+		return "";
+	}
+	if (!trimmedBasePrompt) {
+		return trimmedPrompt;
+	}
+	return `${trimmedBasePrompt}\n\n${trimmedPrompt}`;
 }
 
 export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrpcContext["runtimeApi"] {
@@ -155,6 +168,13 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const body = parseTaskSessionStartRequest(input);
 				const requestedTaskMode = body.mode ?? (body.startInPlanMode ? "plan" : "act");
 				const scopedRuntimeConfig = await deps.loadScopedRuntimeConfig(workspaceScope);
+				const workspaceBoard = await loadWorkspaceBoardById(workspaceScope.workspaceId);
+				const taskColumn =
+					workspaceBoard.columns.find((column) => column.cards.some((card) => card.id === body.taskId)) ?? null;
+				const effectivePrompt =
+					body.resumeFromTrash === true
+						? body.prompt
+						: prependColumnBasePrompt(body.prompt, taskColumn?.basePrompt);
 				const taskCwd = isHomeAgentSessionId(body.taskId)
 					? workspaceScope.workspacePath
 					: await resolveExistingTaskCwdOrEnsure({
@@ -171,7 +191,8 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 				const previousTerminalAgentId = body.resumeFromTrash
 					? (terminalManager.getSummary(body.taskId)?.agentId ?? null)
 					: null;
-				const effectiveAgentId = previousTerminalAgentId ?? scopedRuntimeConfig.selectedAgentId;
+				const effectiveAgentId =
+					previousTerminalAgentId ?? taskColumn?.preferredAgentId ?? scopedRuntimeConfig.selectedAgentId;
 				let useClinePath = effectiveAgentId === "cline";
 				if (body.resumeFromTrash && !useClinePath) {
 					const clineSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
@@ -189,11 +210,11 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					const summary = await clineTaskSessionService.startTaskSession({
 						taskId: body.taskId,
 						cwd: taskCwd,
-						prompt: body.prompt,
+						prompt: effectivePrompt,
 						images: body.images,
 						resumeFromTrash: body.resumeFromTrash,
 						providerId: clineLaunchConfig.providerId,
-						modelId: clineLaunchConfig.modelId,
+						modelId: taskColumn?.preferredModel?.trim() || clineLaunchConfig.modelId,
 						mode: requestedTaskMode,
 						apiKey: clineLaunchConfig.apiKey,
 						baseUrl: clineLaunchConfig.baseUrl,
@@ -240,7 +261,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					args: resolved.args,
 					autonomousModeEnabled: scopedRuntimeConfig.agentAutonomousModeEnabled,
 					cwd: taskCwd,
-					prompt: body.prompt,
+					prompt: effectivePrompt,
 					images: body.images,
 					startInPlanMode: body.startInPlanMode,
 					resumeFromTrash: body.resumeFromTrash,

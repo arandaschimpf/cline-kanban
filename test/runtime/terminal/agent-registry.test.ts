@@ -9,6 +9,7 @@ vi.mock("../../../src/terminal/command-discovery.js", () => ({
 }));
 
 import type { RuntimeConfigState } from "../../../src/config/runtime-config";
+import { getDefaultBoardColumns } from "../../../src/config/runtime-config";
 import {
 	buildRuntimeConfigResponse,
 	detectInstalledCommands,
@@ -24,6 +25,7 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		agentAutonomousModeEnabled: true,
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
+		boardColumns: getDefaultBoardColumns(),
 		commitPromptTemplate: "commit",
 		openPrPromptTemplate: "pr",
 		commitPromptTemplateDefault: "commit",

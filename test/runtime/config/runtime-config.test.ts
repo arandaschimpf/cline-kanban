@@ -441,6 +441,54 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("persists custom board column settings in the project config", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-columns-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-columns-");
+
+		try {
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const updated = await updateRuntimeConfig(tempProject, {
+					boardColumns: [
+						{
+							id: "backlog",
+							title: "Queued",
+							basePrompt: "Start by reading the relevant docs.",
+							preferredAgentId: "codex",
+							preferredModel: "gpt-5",
+						},
+						{ id: "in_progress", title: "Building" },
+						{ id: "review", title: "Review" },
+						{ id: "trash", title: "Done" },
+					],
+				});
+
+				expect(updated.boardColumns[0]).toMatchObject({
+					id: "backlog",
+					title: "Queued",
+					basePrompt: "Start by reading the relevant docs.",
+					preferredAgentId: "codex",
+					preferredModel: "gpt-5",
+				});
+
+				const persisted = JSON.parse(
+					readFileSync(join(tempProject, ".cline", "kanban", "config.json"), "utf8"),
+				) as {
+					boardColumns?: Array<Record<string, unknown>>;
+				};
+				expect(persisted.boardColumns?.[0]).toMatchObject({
+					id: "backlog",
+					title: "Queued",
+					basePrompt: "Start by reading the relevant docs.",
+					preferredAgentId: "codex",
+					preferredModel: "gpt-5",
+				});
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("preserves concurrent config updates across processes", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-concurrent-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-concurrent-");

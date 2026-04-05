@@ -134,6 +134,43 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 	};
 }
 
+function normalizeColumnMetadata(
+	rawColumn: unknown,
+): Pick<BoardColumn, "basePrompt" | "preferredAgentId" | "preferredModel"> {
+	if (!rawColumn || typeof rawColumn !== "object") {
+		return {
+			basePrompt: null,
+			preferredAgentId: null,
+			preferredModel: null,
+		};
+	}
+	const column = rawColumn as {
+		basePrompt?: unknown;
+		preferredAgentId?: unknown;
+		preferredModel?: unknown;
+	};
+	const basePrompt =
+		typeof column.basePrompt === "string" && column.basePrompt.trim().length > 0 ? column.basePrompt : null;
+	const preferredAgentId =
+		column.preferredAgentId === "cline" ||
+		column.preferredAgentId === "claude" ||
+		column.preferredAgentId === "codex" ||
+		column.preferredAgentId === "droid" ||
+		column.preferredAgentId === "gemini" ||
+		column.preferredAgentId === "opencode"
+			? column.preferredAgentId
+			: null;
+	const preferredModel =
+		typeof column.preferredModel === "string" && column.preferredModel.trim().length > 0
+			? column.preferredModel
+			: null;
+	return {
+		basePrompt,
+		preferredAgentId,
+		preferredModel,
+	};
+}
+
 function createDependencyId(): string {
 	return createBrowserUuid().replaceAll("-", "").slice(0, 8);
 }
@@ -221,6 +258,14 @@ export function normalizeBoardData(rawBoard: unknown): BoardData | null {
 		if (!normalizedColumn || !Array.isArray(column.cards)) {
 			continue;
 		}
+		const metadata = normalizeColumnMetadata(rawColumn);
+		normalizedColumn.title =
+			typeof (rawColumn as { title?: unknown }).title === "string" && (rawColumn as { title?: string }).title?.trim()
+				? (rawColumn as { title: string }).title
+				: normalizedColumn.title;
+		normalizedColumn.basePrompt = metadata.basePrompt;
+		normalizedColumn.preferredAgentId = metadata.preferredAgentId;
+		normalizedColumn.preferredModel = metadata.preferredModel;
 		for (const rawCard of column.cards) {
 			const card = normalizeCard(rawCard);
 			if (card) {

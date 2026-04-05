@@ -11,6 +11,9 @@ function createEmptyColumn(id: BoardColumnId, title: string): BoardColumn {
 	return {
 		id,
 		title,
+		basePrompt: null,
+		preferredAgentId: null,
+		preferredModel: null,
 		cards: [],
 	};
 }

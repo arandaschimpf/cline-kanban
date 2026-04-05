@@ -1,4 +1,9 @@
-import type { RuntimeBoardColumnId, RuntimeTaskAutoReviewMode, RuntimeTaskImage } from "@/runtime/types";
+import type {
+	RuntimeAgentId,
+	RuntimeBoardColumnId,
+	RuntimeTaskAutoReviewMode,
+	RuntimeTaskImage,
+} from "@/runtime/types";
 
 export type BoardColumnId = RuntimeBoardColumnId;
 
@@ -51,6 +56,9 @@ export interface BoardCard {
 export interface BoardColumn {
 	id: BoardColumnId;
 	title: string;
+	basePrompt?: string | null;
+	preferredAgentId?: RuntimeAgentId | null;
+	preferredModel?: string | null;
 	cards: BoardCard[];
 }
 

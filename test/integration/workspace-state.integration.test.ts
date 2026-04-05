@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { updateRuntimeConfig } from "../../src/config/runtime-config";
 import type { RuntimeBoardData, RuntimeTaskSessionSummary } from "../../src/core/api-contract";
 import type { WorkspaceStateConflictError } from "../../src/state/workspace-state";
 import {
@@ -136,6 +137,44 @@ describe.sequential("workspace-state integration", () => {
 				const loadedAfterConflict = await loadWorkspaceState(workspacePath);
 				expect(loadedAfterConflict.revision).toBe(2);
 				expect(loadedAfterConflict.board.columns[0]?.cards[0]?.prompt).toBe("Task Two");
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("applies configured board column titles and launch preferences when loading state", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-columns-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-columns");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				await updateRuntimeConfig(workspacePath, {
+					boardColumns: [
+						{
+							id: "backlog",
+							title: "Queued",
+							basePrompt: "Check the relevant changelog first.",
+							preferredAgentId: "codex",
+							preferredModel: "gpt-5",
+						},
+						{ id: "in_progress", title: "Building" },
+						{ id: "review", title: "QA" },
+						{ id: "trash", title: "Done" },
+					],
+				});
+
+				const state = await loadWorkspaceState(workspacePath);
+				expect(state.board.columns[0]).toMatchObject({
+					id: "backlog",
+					title: "Queued",
+					basePrompt: "Check the relevant changelog first.",
+					preferredAgentId: "codex",
+					preferredModel: "gpt-5",
+				});
+				expect(state.board.columns.map((column) => column.title)).toEqual(["Queued", "Building", "QA", "Done"]);
 			} finally {
 				cleanup();
 			}
